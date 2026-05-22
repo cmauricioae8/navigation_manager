@@ -1,0 +1,8 @@
+Waypoint[] waypoints
+bool replace_active_mission
+int32 loops_number
+bool is_path
+---
+bool accepted
+uint32 mission_id
+string message
