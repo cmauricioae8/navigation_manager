@@ -107,7 +107,7 @@ source install/setup.bash
 Terminal 1:
 
 ```bash
-ros2 run navigation_manager nav2_manager
+ros2 run navigation_manager navigation_manager
 ```
 
 Terminal 2 (optional quick test):

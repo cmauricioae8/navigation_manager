@@ -12,7 +12,13 @@ Waypoint manager node:
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
+#include <cstdlib>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #include "navigation_manager/msg/waypoint.hpp"
 #include "navigation_manager/srv/set_waypoint_list.hpp"
@@ -32,7 +38,7 @@ public:
   using SetWaypointList = navigation_manager::srv::SetWaypointList;
 
   WaypointManagerNode()
-  : Node("nav2_waypoint_manager")
+  : Node("navigation_manager")
   {
     this->declare_parameter<double>("time_to_recover", 3.0);
     this->declare_parameter<std::string>("skip_turn_behavior_tree_token", "__skip_turn__");
@@ -51,7 +57,16 @@ public:
 
     manager_timer_ = this->create_wall_timer(100ms, std::bind(&WaypointManagerNode::manager_tick, this));
 
-    RCLCPP_INFO(this->get_logger(), "Waypoint manager ready");
+    RCLCPP_INFO(this->get_logger(), "Navigation manager ready");
+  }
+
+  ~WaypointManagerNode()
+  {
+    std::lock_guard<std::mutex> lock(*pids_mutex_);
+    for (pid_t pid : *child_pids_) {
+      RCLCPP_INFO(this->get_logger(), "Sending SIGKILL to child process %d", pid);
+      kill(pid, SIGKILL);
+    }
   }
 
 private:
@@ -215,9 +230,8 @@ private:
 
     if (!nav_action_client_->action_server_is_ready()) {
       state_ = ManagerState::WAITING_FOR_SERVER;
-      RCLCPP_WARN_THROTTLE(
-        this->get_logger(), *this->get_clock(), 3000,
-        "Waiting for /navigate_to_pose action server");
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 3000,
+                          "Waiting for /navigate_to_pose action server");
       return;
     }
 
@@ -281,6 +295,43 @@ private:
         if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
           const auto wait_time_seconds =
             std::max<int32_t>(0, mission_waypoints_[current_waypoint_idx_].wait_time);
+
+          const std::string action_on_site = mission_waypoints_[current_waypoint_idx_].action_on_site;
+          if (!action_on_site.empty()) {
+            auto logger = this->get_logger();
+            RCLCPP_INFO(logger, "Executing action_on_site: %s", action_on_site.c_str());
+            
+            pid_t pid = fork();
+            if (pid == 0) {
+              // Prefix with 'exec' to replace the shell process with the actual command
+              std::string exec_cmd = "exec " + action_on_site;
+              execl("/bin/sh", "sh", "-c", exec_cmd.c_str(), (char *)nullptr);
+              _exit(127);
+            } else if (pid > 0) {
+              {
+                std::lock_guard<std::mutex> lock(*pids_mutex_);
+                child_pids_->push_back(pid);
+              }
+              std::thread([logger, pid, pids_mutex = pids_mutex_, child_pids = child_pids_]() {
+                int status;
+                waitpid(pid, &status, 0); // Wait to prevent zombie process
+                if (WIFEXITED(status)) {
+                  RCLCPP_INFO(logger, "action_on_site process %d exited with code %d", pid, WEXITSTATUS(status));
+                } else if (WIFSIGNALED(status)) {
+                  RCLCPP_WARN(logger, "action_on_site process %d killed by signal %d", pid, WTERMSIG(status));
+                }
+                // Safely remove PID from tracker
+                std::lock_guard<std::mutex> lock(*pids_mutex);
+                auto it = std::find(child_pids->begin(), child_pids->end(), pid);
+                if (it != child_pids->end()) {
+                  child_pids->erase(it);
+                }
+              }).detach();
+            } else {
+              RCLCPP_ERROR(logger, "Failed to fork process for action_on_site");
+            }
+          }
+
           waiting_until_ = this->now() + rclcpp::Duration::from_seconds(wait_time_seconds);
           state_ = ManagerState::WAITING_WAYPOINT_DELAY;
 
@@ -361,6 +412,9 @@ private:
   }
 
   std::mutex mutex_;
+
+  std::shared_ptr<std::mutex> pids_mutex_{std::make_shared<std::mutex>()};
+  std::shared_ptr<std::vector<pid_t>> child_pids_{std::make_shared<std::vector<pid_t>>()};
 
   rclcpp_action::Client<NavigateToPose>::SharedPtr nav_action_client_;
   rclcpp::Service<SetWaypointList>::SharedPtr set_waypoint_list_srv_;

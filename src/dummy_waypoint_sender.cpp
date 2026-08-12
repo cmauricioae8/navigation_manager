@@ -28,15 +28,18 @@ public:
 
 private:
   static Waypoint make_waypoint(
+    const std::string & name,
     const double x,
     const double y,
     const double yaw_quaternion_z,
     const double yaw_quaternion_w,
     const bool is_mandatory,
     const int32_t wait_time,
+    const std::string & action_on_site,
     const bool with_orientation)
   {
     Waypoint waypoint;
+    waypoint.name = name;
     waypoint.pose.header.frame_id = "map";
     waypoint.pose.pose.position.x = x;
     waypoint.pose.pose.position.y = y;
@@ -47,6 +50,7 @@ private:
     waypoint.pose.pose.orientation.w = yaw_quaternion_w;
     waypoint.is_mandatory = is_mandatory;
     waypoint.wait_time = wait_time;
+    waypoint.action_on_site = action_on_site;
     waypoint.with_orientation = with_orientation;
     return waypoint;
   }
@@ -69,9 +73,11 @@ private:
     request->loops_number = 1;
     request->is_path = false;
     request->waypoints = {
-      make_waypoint(1.0, 0.0, 0.0, 1.0, true, 2, true),
-      make_waypoint(2.0, 0.0, 0.0, 1.0, false, 0, false),
-      make_waypoint(2.0, 1.0, 0.0, 1.0, true, 1, true)
+      make_waypoint("Punto1", 1.0, 0.0, 0.0, 1.0, true, 2, 
+        "ffplay /home/mau2/Documents/MY_RESEARCH/CPP_tutorials/miscellaneous_examples/birds.mp3", true),
+      make_waypoint("Punto2", 2.0, 0.0, 0.0, 1.0, false, 10, 
+        "ffplay /home/mau2/Documents/MY_RESEARCH/CPP_tutorials/miscellaneous_examples/endgame.mp3", false),
+      make_waypoint("Punto3", 2.0, 1.0, 0.0, 1.0, true, 1, "", true)
     };
 
     request_sent_ = true;
