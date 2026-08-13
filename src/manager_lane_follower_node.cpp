@@ -1,6 +1,6 @@
 /*
 @description:
-Waypoint manager node:
+Waypoint manager node to command the lane_follower node:
 - Service server to receive waypoint missions.
 - Action client for NavigateToPose to execute missions sequentially.
 */
@@ -20,26 +20,36 @@ Waypoint manager node:
 #include <sys/wait.h>
 #include <signal.h>
 
-#include "navigation_manager/msg/waypoint.hpp"
-#include "navigation_manager/srv/set_waypoint_list.hpp"
-#include "nav2_msgs/action/navigate_to_pose.hpp"
-#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
+#include "nav2_msgs/action/navigate_to_pose.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
+
+#include "manager_lane_follower/msg/waypoint.hpp"
+#include "manager_lane_follower/srv/set_waypoint_list.hpp"
 
 using namespace std::chrono_literals;
+
+const std::string green = "\033[1;32m";
+const std::string red = "\033[1;31m";
+const std::string blue = "\033[1;34m";
+const std::string yellow = "\033[1;33m";
+const std::string purple = "\033[1;35m";
+const std::string reset = "\033[0m";
+
 
 class WaypointManagerNode : public rclcpp::Node
 {
 public:
   using NavigateToPose = nav2_msgs::action::NavigateToPose;
   using NavigateToPoseGoalHandle = rclcpp_action::ClientGoalHandle<NavigateToPose>;
-  using Waypoint = navigation_manager::msg::Waypoint;
-  using SetWaypointList = navigation_manager::srv::SetWaypointList;
+  using Waypoint = manager_lane_follower::msg::Waypoint;
+  using SetWaypointList = manager_lane_follower::srv::SetWaypointList;
 
   WaypointManagerNode()
-  : Node("navigation_manager")
+  : Node("manager_lane_follower")
   {
+    // TODO: validate if those params are usefull
     this->declare_parameter<double>("time_to_recover", 3.0);
     this->declare_parameter<std::string>("skip_turn_behavior_tree_token", "__skip_turn__");
     this->get_parameter("time_to_recover", time_to_recover_);
@@ -57,19 +67,25 @@ public:
 
     manager_timer_ = this->create_wall_timer(100ms, std::bind(&WaypointManagerNode::manager_tick, this));
 
-    RCLCPP_INFO(this->get_logger(), "Navigation manager ready");
+    RCLCPP_INFO(this->get_logger(), "Manager lane follower ready\n");
   }
 
   ~WaypointManagerNode()
+  {
+    kill_child_processes();
+  }
+
+private:
+  void kill_child_processes()
   {
     std::lock_guard<std::mutex> lock(*pids_mutex_);
     for (pid_t pid : *child_pids_) {
       RCLCPP_INFO(this->get_logger(), "Sending SIGKILL to child process %d", pid);
       kill(pid, SIGKILL);
     }
+    child_pids_->clear();
   }
 
-private:
   enum class ManagerState
   {
     IDLE,
@@ -244,8 +260,9 @@ private:
 
     RCLCPP_INFO(
       this->get_logger(),
-      "Sending mission_id=%u waypoint=%zu/%zu with_orientation=%s wait_time=%d mandatory=%s",
+      "Sending mission_id=%u, waypoint=%s (%zu/%zu), with_orientation=%s, wait_time=%d, mandatory=%s",
       mission_id_,
+      waypoint.name.c_str(),
       current_waypoint_idx_ + 1,
       mission_waypoints_.size(),
       waypoint.with_orientation ? "true" : "false",
@@ -254,14 +271,15 @@ private:
 
     rclcpp_action::Client<NavigateToPose>::SendGoalOptions options;
     options.goal_response_callback =
-      [this, mission_id_at_send](const NavigateToPoseGoalHandle::SharedPtr & goal_handle) {
+      [this, mission_id_at_send, waypoint](const NavigateToPoseGoalHandle::SharedPtr & goal_handle) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (mission_id_at_send != mission_id_ || !mission_active_) {
           return;
         }
 
         if (!goal_handle) {
-          RCLCPP_WARN(this->get_logger(), "Goal rejected for mission_id=%u", mission_id_);
+          RCLCPP_WARN(this->get_logger(), "%s Goal rejected (%s) for mission_id=%u %s",
+                red.c_str(), waypoint.name.c_str(), mission_id_, reset.c_str());
           schedule_recovery_locked("goal rejected by action server");
           return;
         }
@@ -296,6 +314,7 @@ private:
           const auto wait_time_seconds =
             std::max<int32_t>(0, mission_waypoints_[current_waypoint_idx_].wait_time);
 
+          const std::string wp_name = mission_waypoints_[current_waypoint_idx_].name;
           const std::string action_on_site = mission_waypoints_[current_waypoint_idx_].action_on_site;
           if (!action_on_site.empty()) {
             auto logger = this->get_logger();
@@ -337,8 +356,8 @@ private:
 
           RCLCPP_INFO(
             this->get_logger(),
-            "Waypoint %zu succeeded. Waiting %d seconds before next goal",
-            current_waypoint_idx_ + 1, wait_time_seconds);
+            "%s Waypoint: %s, %zu succeeded. Waiting %d seconds before next goal %s",
+            green.c_str(), wp_name.c_str(), current_waypoint_idx_ + 1, wait_time_seconds, reset.c_str());
           return;
         }
 
@@ -383,12 +402,14 @@ private:
           this->get_logger(), "Completed loop %d/%d. Restarting mission",
           loops_completed_, loops_number_);
       }
+      kill_child_processes();
       return;
     }
 
     mission_active_ = false;
     state_ = ManagerState::IDLE;
     RCLCPP_INFO(this->get_logger(), "Mission_id=%u completed", mission_id_);
+    kill_child_processes();
   }
 
   void schedule_recovery_locked(const std::string & reason)

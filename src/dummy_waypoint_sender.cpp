@@ -7,8 +7,8 @@ Dummy node that sends a waypoint list mission to the waypoint manager service.
 #include <functional>
 #include <memory>
 
-#include "navigation_manager/msg/waypoint.hpp"
-#include "navigation_manager/srv/set_waypoint_list.hpp"
+#include "manager_lane_follower/msg/waypoint.hpp"
+#include "manager_lane_follower/srv/set_waypoint_list.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 using namespace std::chrono_literals;
@@ -16,8 +16,8 @@ using namespace std::chrono_literals;
 class DummyWaypointSenderNode : public rclcpp::Node
 {
 public:
-  using Waypoint = navigation_manager::msg::Waypoint;
-  using SetWaypointList = navigation_manager::srv::SetWaypointList;
+  using Waypoint = manager_lane_follower::msg::Waypoint;
+  using SetWaypointList = manager_lane_follower::srv::SetWaypointList;
 
   DummyWaypointSenderNode()
   : Node("dummy_waypoint_sender")
@@ -70,7 +70,7 @@ private:
 
     auto request = std::make_shared<SetWaypointList::Request>();
     request->replace_active_mission = true;
-    request->loops_number = 1;
+    request->loops_number = 2;
     request->is_path = false;
     request->waypoints = {
       make_waypoint("Punto1", 1.0, 0.0, 0.0, 1.0, true, 2, 

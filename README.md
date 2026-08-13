@@ -1,6 +1,6 @@
-# navigation_manager
+# Manager Lane Follower
 
-`navigation_manager` is a ROS 2 package that manages waypoint missions using:
+`manager_lane_follower` is a ROS 2 package that manages waypoint missions using:
 
 - A **service server** to receive waypoint lists.
 - An **action client** to send sequential goals to `/navigate_to_pose` (`nav2_msgs/action/NavigateToPose`).

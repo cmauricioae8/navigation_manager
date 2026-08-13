@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(navigation_manager)
+project(manager_lane_follower)
 
 # Default to C++17
 if(NOT CMAKE_CXX_STANDARD)
@@ -41,24 +41,20 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     geometry_msgs
 )
 
-add_executable(nav2_manager
-  src/nav2_manager.cpp
-)
-ament_target_dependencies(nav2_manager ${dependencies})
+add_executable(manager_follower src/manager_lane_follower_node.cpp)
+ament_target_dependencies(manager_follower ${dependencies})
 
-add_executable(dummy_waypoint_sender
-  src/dummy_waypoint_sender.cpp
-)
+add_executable(dummy_waypoint_sender src/dummy_waypoint_sender.cpp)
 ament_target_dependencies(dummy_waypoint_sender ${dependencies})
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(nav2_manager "${cpp_typesupport_target}")
+target_link_libraries(manager_follower "${cpp_typesupport_target}")
 target_link_libraries(dummy_waypoint_sender "${cpp_typesupport_target}")
 
 ament_export_dependencies(rosidl_default_runtime)
 
 install(TARGETS
-  nav2_manager
+  manager_follower
   dummy_waypoint_sender
   DESTINATION lib/${PROJECT_NAME}
 )
